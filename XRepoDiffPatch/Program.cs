@@ -4,6 +4,7 @@ using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Diagnostics;
 using System.IO;
+using System.Threading.Tasks;
 
 namespace XRepoDiffPatch;
 
@@ -18,23 +19,27 @@ public static class Program
         root.AddArgument(InvocationOptions.GitRoot);
         root.AddArgument(InvocationOptions.FromPath);
         root.AddArgument(InvocationOptions.ToPath);
+        root.AddOption(InvocationOptions.From);
+        root.AddOption(InvocationOptions.To);
 
         root.SetHandler(Run);
 
         return root.Invoke(args);
     }
 
-    private static void Run(InvocationContext context)
+    private static async Task Run(InvocationContext context)
     {
         string gitRoot = context.ParseResult.GetValueForArgument(InvocationOptions.GitRoot);
         string fromPath = context.ParseResult.GetValueForArgument(InvocationOptions.FromPath);
         string toPath = context.ParseResult.GetValueForArgument(InvocationOptions.ToPath);
+        string? from = context.ParseResult.GetValueForOption(InvocationOptions.From);
+        string? to = context.ParseResult.GetValueForOption(InvocationOptions.To);
 
         Console.WriteLine("Start to port latest changes from '{0}' to '{1}'", fromPath, toPath);
 
         using (Repository repo = new(fromPath))
         {
-            Patch diff = repo.Diff.Compare<Patch>(repo.Lookup<Commit>("HEAD~1").Tree, repo.Lookup<Commit>("HEAD").Tree);
+            Patch diff = repo.Diff.Compare<Patch>(repo.Lookup<Commit>(from ?? "HEAD~1").Tree, repo.Lookup<Commit>(to ?? "HEAD").Tree);
 
             string patchPath = Path.Combine(gitRoot, @"usr\bin\patch.exe");
 
@@ -53,8 +58,10 @@ public static class Program
                 return;
             }
 
-            patchProcess.StandardInput.Write(diff.Content);
+            await patchProcess.StandardInput.WriteAsync(diff.Content).ConfigureAwait(false);
             patchProcess.StandardInput.Close();
+
+            await patchProcess.WaitForExitAsync().ConfigureAwait(false);
         }
     }
 }
